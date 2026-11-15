@@ -475,7 +475,7 @@ class WifiNetworksPageTests(TestCase):
         self.assertEqual((staff.audience, staff.order), ("admins", 1))
         page = self.client.get(self.url)
         self.assertContains(page, "Added Lodge Staff.")
-        self.assertContains(page, '<span class="nm">Lodge Guest</span>', html=True)
+        self.assertContains(page, '<span class="nm">Lodge Guest</span>')
         self.assertFalse(page.context["add_open"])
 
         self._post(action="save", id=guest.id, ssid="Lodge Guests", password="newpass99", audience="admins")
@@ -541,6 +541,5 @@ class WifiNetworksPageTests(TestCase):
     def test_manifest_has_a_settings_page_not_fields(self):
         from wifi.plugin import spec
 
-        manifest = spec.manifest()
-        self.assertEqual(manifest.get("settings") or [], [])
-        self.assertEqual([p["title"] for p in manifest["settings_pages"]], ["WiFi networks"])
+        self.assertEqual(tuple(spec.settings), ())
+        self.assertEqual([(p.title, p.url_name) for p in spec.settings_pages], [("WiFi networks", "wifi_networks")])
