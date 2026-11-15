@@ -32,9 +32,9 @@ Settings page.
 
 The app runs in its own container: `network: none`, `lifecycle: on_demand`,
 `memory_mb: 96`, no broker permissions beyond reading its own settings.
-`scripts/container_smoke.sh` (run in CI) installs the wheel into an image
-derived from the hub's app runtime, starts it read-only under the memory
-limit, checks `/_bdh/health` and the page, and prints its memory use.
+Since 2.1.0 it ships as its own image. CI's `image` job (from bdh-sdk's `app-ci.yml`) locks the
+dependencies against the hub's app runtime, builds the app's image and smoke-tests it the way
+the supervisor runs it.
 
 ## Development
 
