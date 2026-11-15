@@ -11,7 +11,8 @@
 set -eu
 wheel=${1:?usage: container_smoke.sh WHEEL}
 app=${SMOKE_APP:?set SMOKE_APP to the app id}
-page=${SMOKE_PAGE:-/$app/}
+# Pages to fetch after the health check (space separated); all must be 200.
+paths=${SMOKE_PATHS:-/$app/}
 memory=${SMOKE_MEMORY_MB:-96}
 image=${RUNTIME_IMAGE:-ghcr.io/blackdiamondlodge/bdh-app-runtime:hub-api-2}
 name=$app-smoke-$$
@@ -29,10 +30,11 @@ USER 10001:10001
 EOF
 docker build -q -t "$tag" "$work" >/dev/null
 
-docker run -d --name "$name" --memory "${memory}m" --read-only --tmpfs /tmp \
+token=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+docker run -d --name "$name" --memory "${memory}m" --memory-swap "${memory}m" --read-only --tmpfs /tmp \
     --mount type=volume,dst=/data \
     -e BDH_APP_ID="$app" \
-    -e BDH_APP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')" \
+    -e BDH_APP_TOKEN="$token" \
     -p 127.0.0.1::8000 "$tag" >/dev/null
 port=$(docker port "$name" 8000/tcp | head -n1 | sed 's/.*://')
 
@@ -47,9 +49,15 @@ if [ -z "$ok" ]; then
 fi
 curl -sf "http://127.0.0.1:$port/_bdh/health"; echo
 
-# Requests signed the way the hub's proxy signs them (anonymous visitor).
+# Requests signed the way the hub's proxy signs them (anonymous visitor),
+# made from a sidecar in the app's network namespace so the client's memory
+# isn't charged to the app's cgroup.
+client() {
+    docker run --rm -i --network "container:$name" -e BDH_APP_TOKEN="$token" \
+        --entrypoint python "$tag" "$@"
+}
 hub_get() {
-    docker exec "$name" python -c "
+    client -c "
 import os, sys, urllib.request
 from bdh_sdk.identity import signed_headers
 path = sys.argv[1]
@@ -64,9 +72,17 @@ if body is not None:
 " "$1"
 }
 hub_get /_bdh/manifest
-if ! hub_get "$page"; then
+for path in $paths; do
+    if ! hub_get "$path"; then
+        docker logs "$name" 2>&1 | tail -n 80
+        echo "$app: GET $path failed"; exit 1
+    fi
+done
+# App-specific checks, run inside the container (signed GETs via bdh_sdk).
+extra=${SMOKE_EXTRA:-scripts/container_smoke_extra.py}
+if [ -f "$extra" ] && ! client - < "$extra"; then
     docker logs "$name" 2>&1 | tail -n 80
-    echo "$app page did not render"; exit 1
+    echo "$app: $extra failed"; exit 1
 fi
 sleep 5
 docker logs "$name" 2>&1 | tail -n 20
@@ -78,5 +94,11 @@ docker exec "$name" python -c "
 s = dict(l.split() for l in open('/sys/fs/cgroup/memory.stat'))
 cur = int(open('/sys/fs/cgroup/memory.current').read())
 ws = (cur - int(s['inactive_file'])) / 2**20
-print(f'$app memory: working_set={ws:.1f}MB anon={int(s[\"anon\"]) / 2**20:.1f}MB limit=${memory}MB')
+def mb(f):
+    try:
+        return f'{int(open(\"/sys/fs/cgroup/\" + f).read()) / 2**20:.1f}MB'
+    except (OSError, ValueError):
+        return '?'
+print(f'$app memory: working_set={ws:.1f}MB anon={int(s[\"anon\"]) / 2**20:.1f}MB '
+      f'peak={mb(\"memory.peak\")} swap={mb(\"memory.swap.current\")} limit=${memory}MB')
 "
