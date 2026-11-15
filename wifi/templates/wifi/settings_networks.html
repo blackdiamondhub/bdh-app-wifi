@@ -1,0 +1,85 @@
+{% extends 'hub_settings/_layout.html' %}
+
+{% block title %}WiFi networks · Settings{% endblock %}
+
+{% block section %}
+<style>
+    .wf-net { margin-bottom: 10px; }
+    .wf-net > summary { list-style: none; display: flex; align-items: center; gap: 12px; padding: 16px 22px; cursor: pointer; user-select: none; }
+    .wf-net > summary::-webkit-details-marker { display: none; }
+    .wf-net > summary .ic { color: var(--acc2); width: 20px; text-align: center; flex: none; }
+    .wf-net > summary .nm { font-size: 16px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wf-net > summary .st { color: var(--mut); font-size: 13.5px; white-space: nowrap; }
+    .wf-net > summary .chev { color: var(--mut); font-size: 18px; transition: transform .15s; }
+    .wf-net[open] > summary { border-bottom: 1px solid var(--line); }
+    .wf-net[open] > summary .chev { transform: rotate(90deg); }
+    .wf-pw { display: flex; gap: 8px; align-items: center; }
+    .wf-pw .hst-btn { padding: 0 14px; }
+    .wf-act { display: flex; gap: 10px; padding: 14px 22px; justify-content: flex-end; }
+    .wf-act .del { margin-right: auto; color: var(--red); }
+    .wf-addbtn { width: 100%; margin: 8px 0 18px; }
+    .wf-add[hidden] { display: none; }
+</style>
+
+<div class="hst-head">
+    <div>
+        <h2>WiFi networks</h2>
+        <p>Each network gets a QR code on the WiFi page. Guests scan it to join.</p>
+    </div>
+</div>
+
+{% if note %}<div class="hst-note {{ note.0 }}">{{ note.1 }}</div>{% endif %}
+
+{% for n in networks %}
+<details class="hst-card wf-net"{% if n.id == open_id %} open{% endif %}>
+<summary>
+    <i class="fas {% if n.audience == 'admins' %}fa-lock{% else %}fa-wifi{% endif %} ic" aria-hidden="true"></i>
+    <span class="nm">{{ n.ssid }}</span>
+    <span class="st">{% if n.audience == 'admins' %}Admins only{% else %}Everyone{% endif %}{% if not n.password %} · open{% endif %}</span>
+    <span class="chev" aria-hidden="true">›</span>
+</summary>
+<form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="id" value="{{ n.id }}">
+    {% include "wifi/_network_fields.html" with net=n %}
+    <div class="wf-act">
+        <button class="hst-btn ghost del" name="action" value="delete" formnovalidate onclick="return confirm('Remove {{ n.ssid|escapejs }}?')">Remove</button>
+        <button class="hst-btn" name="action" value="save">Save</button>
+    </div>
+</form>
+</details>
+{% empty %}
+<div class="hst-card"><div class="hst-row"><span class="hst-none">No networks yet.</span></div></div>
+{% endfor %}
+
+<button type="button" class="hst-btn ghost wf-addbtn" id="wf-addbtn"{% if add_open %} hidden{% endif %}>+ Add network</button>
+
+<form method="post" class="hst-card wf-add" id="wf-add"{% if not add_open %} hidden{% endif %}>
+    {% csrf_token %}
+    <h3>Add a network</h3>
+    {% include "wifi/_network_fields.html" with net=form %}
+    <div class="wf-act">
+        <button type="button" class="hst-btn ghost" id="wf-addcancel"{% if not networks %} hidden{% endif %}>Cancel</button>
+        <button class="hst-btn" name="action" value="add">Add network</button>
+    </div>
+</form>
+<script>
+(function () {
+    var btn = document.getElementById('wf-addbtn'), form = document.getElementById('wf-add');
+    btn.addEventListener('click', function () {
+        btn.hidden = true; form.hidden = false;
+        form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    document.getElementById('wf-addcancel').addEventListener('click', function () {
+        form.reset(); form.hidden = true; btn.hidden = false;
+    });
+    document.querySelectorAll('.wf-show').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var input = b.previousElementSibling, show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            b.textContent = show ? 'Hide' : 'Show';
+        });
+    });
+})();
+</script>
+{% endblock %}

@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 from pyzbar.pyzbar import decode
 from tests.selenium_helpers import click_until, get_chrome_options, login_from_page
 
+from wifi.models import LegacyImport, Network
 from wifi.views import qr_svg
 
 def _rasterize_qr_svg(svg, scale=12):
@@ -436,3 +437,109 @@ class WifiBrokerTests(TestCase):
                          [("Lodge Guest", "s3cret")])
         asked = {p["key"] for p in self.broker.ops("settings.get") if p["app"] == "wifi"}
         self.assertTrue({"ssid_1", "password_1", "audience_1", "ssid_2", "audience_2"} <= asked)
+
+
+class WifiNetworksPageTests(TestCase):
+    """Settings › WiFi networks: one card per network, like calendar feeds."""
+
+    def setUp(self):
+        self.url = reverse("wifi_networks")
+        self.admin = User.objects.create_user("owner", password="x", is_staff=True)
+
+    def _post(self, **data):
+        self.client.force_login(self.admin)
+        return self.client.post(self.url, data)
+
+    def test_admins_only(self):
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.client.force_login(User.objects.create_user("member", password="x"))
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.assertEqual(self._post(action="add", ssid="x").status_code, 302)  # the admin may
+        self.client.force_login(User.objects.create_user("member2", password="x"))
+        self.assertEqual(self.client.post(self.url, {"action": "add", "ssid": "y"}).status_code, 404)
+        self.assertEqual(list(Network.objects.values_list("ssid", flat=True)), ["x"])
+
+    def test_empty_shows_add_form(self):
+        self.client.force_login(self.admin)
+        page = self.client.get(self.url)
+        self.assertContains(page, "No networks yet.")
+        self.assertTrue(page.context["add_open"])
+
+    def test_add_save_delete(self):
+        r = self._post(action="add", ssid="Lodge Guest", password="s3cret123", audience="guests")
+        self.assertRedirects(r, self.url, fetch_redirect_response=False)
+        self._post(action="add", ssid="Lodge Staff", password="", audience="admins")
+        guest, staff = Network.objects.all()
+        self.assertEqual((guest.ssid, guest.password, guest.audience, guest.order),
+                         ("Lodge Guest", "s3cret123", "guests", 0))
+        self.assertEqual((staff.audience, staff.order), ("admins", 1))
+        page = self.client.get(self.url)
+        self.assertContains(page, "Added Lodge Staff.")
+        self.assertContains(page, '<span class="nm">Lodge Guest</span>')
+        self.assertFalse(page.context["add_open"])
+
+        self._post(action="save", id=guest.id, ssid="Lodge Guests", password="newpass99", audience="admins")
+        guest.refresh_from_db()
+        self.assertEqual((guest.ssid, guest.password, guest.audience), ("Lodge Guests", "newpass99", "admins"))
+
+        self._post(action="delete", id=staff.id)
+        self.assertEqual(list(Network.objects.values_list("ssid", flat=True)), ["Lodge Guests"])
+        self.assertEqual(self._post(action="delete", id=9999).status_code, 404)
+
+    def test_validation(self):
+        for data, msg in (({"ssid": " "}, "Enter the network name."),
+                          ({"ssid": "x" * 33}, "at most 32 bytes"),
+                          ({"ssid": "ok", "password": "short"}, "8 to 63 characters"),
+                          ({"ssid": "ok", "password": "x" * 64}, "8 to 63 characters")):
+            r = self._post(action="add", **data)
+            self.assertEqual(r.status_code, 200)
+            self.assertContains(r, msg)
+            self.assertTrue(r.context["add_open"])
+        self.assertFalse(Network.objects.exists())
+        net = Network.objects.create(ssid="Keep", password="keepkeep")
+        r = self._post(action="save", id=net.id, ssid="", password="")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["open_id"], net.id)
+        net.refresh_from_db()
+        self.assertEqual(net.ssid, "Keep")
+
+    def test_qr_page_reads_the_networks(self):
+        Network.objects.create(ssid="Lodge Guest", password="s3cret123", order=1)
+        Network.objects.create(ssid="Lodge Open", order=0)
+        Network.objects.create(ssid="Lodge Staff", password="staffstaff", audience="admins")
+        codes = [(c["ssid"], c["password"]) for c in self.client.get(reverse("wifi_qr")).context["qr_codes"]]
+        self.assertEqual(codes, [("Lodge Open", ""), ("Lodge Guest", "s3cret123")])
+        self.client.force_login(self.admin)
+        codes = [c["ssid"] for c in self.client.get(reverse("wifi_qr")).context["qr_codes"]]
+        self.assertEqual(codes, ["Lodge Staff"])
+
+    @mock.patch.dict(os.environ, {
+        "BDH_WIFI_SSID_1": "Lodge Guest", "BDH_WIFI_PASSWORD_1": "s3cret",
+        "BDH_WIFI_SSID_3": "Lodge Staff", "BDH_WIFI_AUDIENCE_3": "admins",
+    })
+    def test_old_slots_imported_once(self):
+        self.client.force_login(self.admin)
+        self.client.get(self.url)
+        self.assertEqual(list(Network.objects.values_list("ssid", "password", "audience")),
+                         [("Lodge Guest", "s3cret", "guests"), ("Lodge Staff", "", "admins")])
+        # Removing them all must not bring them back.
+        for net in Network.objects.all():
+            self._post(action="delete", id=net.id)
+        self.client.get(self.url)
+        self.client.get(reverse("wifi_qr"))
+        self.assertFalse(Network.objects.exists())
+        self.assertEqual(LegacyImport.objects.count(), 1)
+
+    def test_import_retried_when_settings_unreadable(self):
+        with mock.patch("wifi.views.app_setting", side_effect=RuntimeError("broker down")):
+            self.client.get(reverse("wifi_qr"))
+        self.assertFalse(LegacyImport.objects.exists())
+        with mock.patch.dict(os.environ, {"BDH_WIFI_SSID_1": "Later"}):
+            self.client.get(reverse("wifi_qr"))
+        self.assertEqual(list(Network.objects.values_list("ssid", flat=True)), ["Later"])
+
+    def test_manifest_has_a_settings_page_not_fields(self):
+        from wifi.plugin import spec
+
+        self.assertEqual(tuple(spec.settings), ())
+        self.assertEqual([(p.title, p.url_name) for p in spec.settings_pages], [("WiFi networks", "wifi_networks")])
