@@ -1,0 +1,14 @@
+<div class="hst-row">
+    <div class="lbl"><b>Network name</b><small>The SSID, exactly as it appears on phones.</small></div>
+    <div class="ctl"><input class="hst-in txt" name="ssid" value="{{ net.ssid|default:'' }}" maxlength="32" required spellcheck="false" autocapitalize="off"></div>
+</div>
+<div class="hst-row">
+    <div class="lbl"><b>Password</b><small>Leave empty for an open network.</small></div>
+    <div class="ctl wf-pw"><input class="hst-in txt" type="password" name="password" value="{{ net.password|default:'' }}" maxlength="63" autocomplete="new-password" spellcheck="false" autocapitalize="off"><button type="button" class="hst-btn ghost wf-show">Show</button></div>
+</div>
+<div class="hst-row">
+    <div class="lbl"><b>Shown to</b><small>Admins-only networks appear when an admin is signed in.</small></div>
+    <div class="ctl"><select class="hst-in" name="audience">
+        {% for v, l in audiences %}<option value="{{ v }}"{% if v == net.audience %} selected{% endif %}>{{ l }}</option>{% endfor %}
+    </select></div>
+</div>
