@@ -72,11 +72,8 @@ class WifiQRGenerationTests(TestCase):
     def setUp(self):
         self.client = Client()
 
-    @override_settings(
-        WIFI_NETWORKS_PUBLIC=["TestNetwork"],
-        WIFI_PASSWORD_FOR_TESTNETWORK="testpass123",
-    )
-    def test_qr_code_generation_with_env_variables(self):
+    @override_settings(BDH_WIFI_SSID_1="TestNetwork", BDH_WIFI_PASSWORD_1="testpass123")
+    def test_qr_code_generation_from_settings(self):
         response = self.client.get("/wifi/")
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
@@ -90,7 +87,8 @@ class WifiQRGenerationTests(TestCase):
             decoded = [d.data.decode("utf-8") for d in decode(_rasterize_qr_svg(qr_svg(text)))]
             self.assertEqual(decoded, [text])
 
-    @override_settings(WIFI_NETWORKS_PUBLIC=["Guest"], WIFI_NETWORKS_AUTH=["Private"])
+    @override_settings(BDH_WIFI_SSID_1="Guest", BDH_WIFI_SSID_2="Private",
+                       BDH_WIFI_AUDIENCE_2="admins")
     def test_private_networks_are_admin_only(self):
         def ssids():
             return [q["ssid"] for q in self.client.get("/wifi/").context["qr_codes"]]
@@ -108,12 +106,12 @@ class WifiQRGenerationTests(TestCase):
 
 @tag('selenium')
 @override_settings(
-    WIFI_NETWORKS_PUBLIC=["TestNetwork","TestNetwork2"],
-    WIFI_NETWORKS_AUTH=["TestNetworkAuth","TestNetworkAuth2"],
-    WIFI_PASSWORD_FOR_TESTNETWORK="testpass123",
-    WIFI_PASSWORD_FOR_TESTNETWORK2="testpass1232",
-    WIFI_PASSWORD_FOR_TESTNETWORKAUTH="testpass1233",
-    WIFI_PASSWORD_FOR_TESTNETWORKAUTH2="testpass1234",
+    BDH_WIFI_SSID_1="TestNetwork", BDH_WIFI_PASSWORD_1="testpass123",
+    BDH_WIFI_SSID_2="TestNetwork2", BDH_WIFI_PASSWORD_2="testpass1232",
+    BDH_WIFI_SSID_3="TestNetworkAuth", BDH_WIFI_PASSWORD_3="testpass1233",
+    BDH_WIFI_AUDIENCE_3="admins",
+    BDH_WIFI_SSID_4="TestNetworkAuth2", BDH_WIFI_PASSWORD_4="testpass1234",
+    BDH_WIFI_AUDIENCE_4="admins",
 )
 class WifiQRPageSeleniumTests(StaticLiveServerTestCase):
     @classmethod
@@ -361,23 +359,20 @@ class WifiQRPageSeleniumTests(StaticLiveServerTestCase):
 
 class WifiSettingsTests(TestCase):
     @mock.patch.dict(os.environ, {
-        "BDH_WIFI_NETWORKS_PUBLIC": "Lodge Guest, Other",
-        "BDH_WIFI_PASSWORD_FOR_LODGE_GUEST": "s3cret",
+        "BDH_WIFI_SSID_1": "Lodge Guest",
+        "BDH_WIFI_PASSWORD_1": "s3cret",
+        "BDH_WIFI_SSID_3": "Lodge Open",
     })
     def test_namespaced_env_settings(self):
         response = Client().get(reverse("wifi_qr"))
         self.assertEqual(response.status_code, 200)
-        codes = {c["ssid"]: c["password"] for c in response.context["qr_codes"]}
-        self.assertEqual(codes, {"Lodge Guest": "s3cret", "Other": "password"})
-
-    @mock.patch.dict(os.environ, {
-        "WIFI_NETWORKS_PUBLIC": "legacy_net",
-        "WIFI_PASSWORD_FOR_LEGACY_NET": "old-name",
-    })
-    def test_legacy_env_names_still_work(self):
-        response = Client().get(reverse("wifi_qr"))
-        codes = {c["ssid"]: c["password"] for c in response.context["qr_codes"]}
-        self.assertEqual(codes, {"legacy_net": "old-name"})
+        codes = [(c["ssid"], c["password"]) for c in response.context["qr_codes"]]
+        self.assertEqual(codes, [("Lodge Guest", "s3cret"), ("Lodge Open", "")])
+        # SSID chosen so the SDK QR (ECC H + logo hole) decodes; a few short
+        # version-3 payloads such as "WIFI:S:Other;T:nopass;;" do not (SDK qr_svg gap).
+        open_svg = base64.b64decode(response.context["qr_codes"][1]["qr_image"]).decode("utf-8")
+        self.assertEqual([d.data.decode("utf-8") for d in decode(_rasterize_qr_svg(open_svg))],
+                         ["WIFI:S:Lodge Open;T:nopass;;"])
 
     def test_no_networks_configured_shows_none(self):
         # The base app must not ship a site-specific default network.
@@ -387,8 +382,8 @@ class WifiSettingsTests(TestCase):
         self.assertEqual(response.context["qr_codes"], [])
 
     @mock.patch.dict(os.environ, {
-        "BDH_WIFI_NETWORKS_PUBLIC": "y'all guest",
-        "BDH_WIFI_PASSWORD_FOR_Y_ALL_GUEST": "pa;ss:wo,rd\\\"x",
+        "BDH_WIFI_SSID_1": "y'all guest",
+        "BDH_WIFI_PASSWORD_1": "pa;ss:wo,rd\\\"x",
     })
     def test_ssid_with_punctuation_and_escaped_qr(self):
         response = Client().get(reverse("wifi_qr"))
@@ -398,3 +393,46 @@ class WifiSettingsTests(TestCase):
         svg = base64.b64decode(codes[0]["qr_image"]).decode("utf-8")
         self.assertEqual([d.data.decode("utf-8") for d in decode(_rasterize_qr_svg(svg))],
                          ['WIFI:S:y\'all guest;T:WPA;P:pa\\;ss\\:wo\\,rd\\\\\\"x;;'])
+
+
+class WifiManifestTests(TestCase):
+    def test_hub_api_2_manifest(self):
+        from wifi.plugin import spec
+
+        manifest = spec.manifest()
+        self.assertEqual(manifest["api_version"], 2)
+        self.assertEqual(manifest["permissions"], [])
+        self.assertEqual(manifest["network"], "none")
+        self.assertEqual(manifest["lifecycle"], "on_demand")
+
+    def test_plugin_module_imports_cleanly(self):
+        from bdh_sdk.testing import assert_plugin_importable
+
+        assert_plugin_importable("wifi.plugin")
+
+
+class WifiBrokerTests(TestCase):
+    """In its container the app reads the networks from the hub broker."""
+
+    def setUp(self):
+        from bdh_sdk import settings
+        from bdh_sdk.testing import FakeBroker
+
+        saved = settings._store
+        self.broker = FakeBroker(grants=("settings.get",), install=True)
+        self.broker.start()
+        self.addCleanup(settings.set_store, saved)
+        self.addCleanup(self.broker.stop)
+
+    def test_networks_from_hub_settings(self):
+        self.broker.settings.update({
+            ("wifi", "ssid_1"): "Lodge Guest", ("wifi", "password_1"): "s3cret",
+            ("wifi", "ssid_2"): "Lodge Staff", ("wifi", "password_2"): "staff",
+            ("wifi", "audience_2"): "admins",
+        })
+        with mock.patch.dict(os.environ, {}, clear=True):
+            response = Client().get(reverse("wifi_qr"))
+        self.assertEqual([(c["ssid"], c["password"]) for c in response.context["qr_codes"]],
+                         [("Lodge Guest", "s3cret")])
+        asked = {p["key"] for p in self.broker.ops("settings.get") if p["app"] == "wifi"}
+        self.assertTrue({"ssid_1", "password_1", "audience_1", "ssid_2", "audience_2"} <= asked)

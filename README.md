@@ -5,8 +5,8 @@ lodge network by scanning. Installed into the hub through the
 `blackdiamondhub.plugins` entry point (see
 [bdh-sdk](https://github.com/blackdiamondlodge/bdh-sdk)).
 
-Page: `/wifi/` (URL name `wifi_qr`). Admins (signed-in staff) see every network in
-`NETWORKS_AUTH`; everyone else sees `NETWORKS_PUBLIC`.
+Page: `/wifi/` (URL name `wifi_qr`). Each network is shown either to everyone
+or only to signed-in admins (staff); admins see the admins-only ones.
 
 Each network gets a site-branded SVG QR code from `bdh_sdk.qr.qr_svg`: error
 correction level H with the site's monogram over the centre. Special characters
@@ -14,14 +14,27 @@ correction level H with the site's monogram over the centre. Special characters
 
 ## Settings
 
-Read with `bdh_sdk.settings.app_setting`: the namespaced env var first, then
-the legacy name.
+Up to four networks, set on the hub's Settings page (saved in the hub and read
+over the broker with `bdh_sdk.settings.app_setting`). For local development the
+`BDH_WIFI_<KEY>` environment variables are the fallback.
 
-| Setting | Legacy name | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `BDH_WIFI_NETWORKS_PUBLIC` | `WIFI_NETWORKS_PUBLIC` | none (comma separated SSIDs) |
-| `BDH_WIFI_NETWORKS_AUTH` | `WIFI_NETWORKS_AUTH` | none |
-| `BDH_WIFI_PASSWORD_FOR_<SSID>` | `WIFI_PASSWORD_FOR_<SSID>` | `password` (SSID upper-cased, every non-alphanumeric → `_`, e.g. `y'all guest` → `Y_ALL_GUEST`) |
+| `ssid_<n>` | Network name; empty hides slot `<n>` | empty |
+| `password_<n>` | Password; empty makes an open-network QR code | empty |
+| `audience_<n>` | `guests` (everyone) or `admins` (signed-in admins only) | `guests` |
+
+The old `NETWORKS_PUBLIC`/`NETWORKS_AUTH`/`PASSWORD_FOR_<SSID>` settings and
+their `WIFI_*` environment names are gone in 2.0: re-enter the networks on the
+Settings page.
+
+## Container (hub API 2)
+
+The app runs in its own container: `network: none`, `lifecycle: on_demand`,
+`memory_mb: 96`, no broker permissions beyond reading its own settings.
+`scripts/container_smoke.sh` (run in CI) installs the wheel into an image
+derived from the hub's app runtime, starts it read-only under the memory
+limit, checks `/_bdh/health` and the page, and prints its memory use.
 
 ## Development
 

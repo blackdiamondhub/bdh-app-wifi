@@ -82,7 +82,7 @@
       <div class="wifi-card">
         <h2 class="wifi-ssid"><i class="fas fa-wifi" aria-hidden="true"></i>{{ network.ssid }}</h2>
         <img src="data:image/svg+xml;base64,{{ network.qr_image }}" class="qr-code" alt="QR code for {{ network.ssid }}">
-        <p class="wifi-password">Password<strong>{{ network.password }}</strong></p>
+        {% if network.password %}<p class="wifi-password">Password<strong>{{ network.password }}</strong></p>{% endif %}
       </div>
     {% empty %}
       <p class="wifi-empty">No networks are configured.</p>
