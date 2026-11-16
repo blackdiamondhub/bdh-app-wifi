@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bdh-app-wifi"
-version = "2.2.0"
+version = "2.2.1"
 description = "Black Diamond Hub app: Wi-Fi QR codes for guests"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "bdh-sdk[qr]>=0.23,<1",
+    "bdh-sdk[qr]>=0.30,<1",
 ]
 
 [project.urls]
