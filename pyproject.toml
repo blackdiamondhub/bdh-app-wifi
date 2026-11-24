@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/blackdiamondlodge/bdh-app-wifi"
+Source = "https://github.com/blackdiamondhub/bdh-app-wifi"
 
 [project.entry-points."blackdiamondhub.plugins"]
 wifi = "wifi.plugin:spec"
