@@ -7,6 +7,6 @@ on:
 
 jobs:
   hub:
-    uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-ci.yml@v0
+    uses: blackdiamondhub/bdh-sdk/.github/workflows/app-ci.yml@v0
     with:
       app_id: wifi

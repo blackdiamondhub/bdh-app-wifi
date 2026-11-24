@@ -6,7 +6,7 @@ on:
 
 jobs:
   release:
-    uses: blackdiamondlodge/bdh-sdk/.github/workflows/app-release.yml@v0
+    uses: blackdiamondhub/bdh-sdk/.github/workflows/app-release.yml@v0
     permissions:
       contents: write
       id-token: write

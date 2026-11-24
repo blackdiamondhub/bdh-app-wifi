@@ -3,7 +3,7 @@
 Black Diamond Hub app that shows Wi-Fi QR codes, so guests can join the
 lodge network by scanning. Installed into the hub through the
 `blackdiamondhub.plugins` entry point (see
-[bdh-sdk](https://github.com/blackdiamondlodge/bdh-sdk)).
+[bdh-sdk](https://github.com/blackdiamondhub/bdh-sdk)).
 
 Page: `/wifi/` (URL name `wifi_qr`). Each network is shown either to everyone
 or only to signed-in admins (staff); admins see the admins-only ones.
