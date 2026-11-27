@@ -25,6 +25,9 @@ spec = PluginSpec(
         SettingsPage("WiFi networks", "wifi_networks",
                      subtitle="Networks guests can join by scanning a QR code", icon="fas fa-wifi"),
     ),
+    # Read-only guest network lookup for the hub's assistant, in every mode.
+    tools="wifi.assistant.tools",
+    run_tool="wifi.assistant.run_tool",
     api_version=2,
     # Only reads its own settings; the QR codes are drawn locally.
     permissions=(),
