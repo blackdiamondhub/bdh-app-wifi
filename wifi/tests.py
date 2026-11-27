@@ -563,3 +563,53 @@ class HubFrameLayoutTests(TestCase):
                 if pattern.search(line):
                     hits.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
         self.assertEqual(hits, [])
+
+
+class WifiAssistantToolTests(TestCase):
+    """The assistant's guest WiFi lookup never hands out an admins-only network."""
+
+    def setUp(self):
+        LegacyImport.objects.create()
+        Network.objects.create(ssid="Lodge Guest", password="guestpass1", audience="guests", order=0)
+        Network.objects.create(ssid="Lodge Owner", password="ownersecret9", audience="admins", order=1)
+        Network.objects.create(ssid="Lodge IoT", password="iotsecret77", audience="admins", order=2)
+
+    def run_tool(self, mode="guest"):
+        from wifi import assistant
+        return assistant.run_tool("wifi_info", {}, mode=mode)
+
+    def test_every_mode_gets_one_readonly_lookup(self):
+        from bdh_sdk import ALL_MODES, hooks
+        from wifi import assistant
+        from wifi.plugin import spec
+        for mode in sorted(ALL_MODES):
+            with self.subTest(mode=mode):
+                tools = assistant.tools(mode=mode)
+                self.assertEqual([t.id for t in tools], ["wifi_info"])
+                self.assertEqual((tools[0].modes, tools[0].readonly, tools[0].confirm), (ALL_MODES, True, False))
+                self.assertLessEqual(len(tools[0].description), 300)
+        self.assertEqual([t["id"] for t in hooks.run(spec, "tools", mode="guest")], ["wifi_info"])
+
+    def test_guest_network_and_password(self):
+        self.assertEqual(self.run_tool(), {
+            "network": "Lodge Guest", "password": "guestpass1",
+            "note": "It's also on the WiFi page of the hub's screen, with a QR code to scan."})
+
+    def test_admins_only_networks_never_in_any_mode(self):
+        import json
+        from bdh_sdk import ALL_MODES
+        Network.objects.create(ssid="Lodge Guest 5G", password="", audience="guests", order=3)
+        for mode in sorted(ALL_MODES):
+            with self.subTest(mode=mode):
+                result = self.run_tool(mode)
+                self.assertEqual([(n["network"], n["password"]) for n in result["networks"]],
+                                 [("Lodge Guest", "guestpass1"), ("Lodge Guest 5G", "none, it's an open network")])
+                text = json.dumps(result)
+                for secret in ("Lodge Owner", "ownersecret9", "Lodge IoT", "iotsecret77"):
+                    self.assertNotIn(secret, text)
+
+    def test_no_guest_network(self):
+        from bdh_sdk.tools import ToolError
+        Network.objects.filter(audience="guests").delete()
+        with self.assertRaisesMessage(ToolError, "No guest WiFi network is set up on the hub."):
+            self.run_tool()
