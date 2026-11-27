@@ -43,7 +43,7 @@
     <input type="hidden" name="id" value="{{ n.id }}">
     {% include "wifi/_network_fields.html" with net=n %}
     <div class="wf-act">
-        <button class="hst-btn ghost del" name="action" value="delete" formnovalidate onclick="return confirm('Remove {{ n.ssid|escapejs }}?')">Remove</button>
+        <button class="hst-btn ghost del" name="action" value="delete" formnovalidate data-bdh-confirm="Remove {{ n.ssid }}?" data-bdh-confirm-ok="Remove">Remove</button>
         <button class="hst-btn" name="action" value="save">Save</button>
     </div>
 </form>
